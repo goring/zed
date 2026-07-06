@@ -1249,12 +1249,24 @@ pub fn get_gamma_correction_ratios(gamma: f32) -> [f32; 4] {
     ]
 }
 
+/// Parameters for a caller-rasterized monochrome bitmap inserted into the sprite
+/// atlas. `id` uniquely identifies the bitmap's content (the caller hashes whatever
+/// determines the pixels); `size` is its device-pixel dimensions. Generic: gpui does
+/// not interpret `id`.
+#[derive(Clone, PartialEq, Eq, Hash)]
+#[expect(missing_docs)]
+pub struct RenderCustomParams {
+    pub id: u64,
+    pub size: Size<DevicePixels>,
+}
+
 #[derive(PartialEq, Eq, Hash, Clone)]
 #[expect(missing_docs)]
 pub enum AtlasKey {
     Glyph(RenderGlyphParams),
     Svg(RenderSvgParams),
     Image(RenderImageParams),
+    Custom(RenderCustomParams),
 }
 
 impl AtlasKey {
@@ -1279,6 +1291,7 @@ impl AtlasKey {
             }
             AtlasKey::Svg(_) => AtlasTextureKind::Monochrome,
             AtlasKey::Image(_) => AtlasTextureKind::Polychrome,
+            AtlasKey::Custom(_) => AtlasTextureKind::Monochrome,
         }
     }
 }
@@ -1298,6 +1311,12 @@ impl From<RenderSvgParams> for AtlasKey {
 impl From<RenderImageParams> for AtlasKey {
     fn from(params: RenderImageParams) -> Self {
         Self::Image(params)
+    }
+}
+
+impl From<RenderCustomParams> for AtlasKey {
+    fn from(params: RenderCustomParams) -> Self {
+        Self::Custom(params)
     }
 }
 

@@ -10,8 +10,8 @@ use crate::{
     KeystrokeEvent, LayoutId, LineLayoutIndex, Modifiers, ModifiersChangedEvent, MonochromeSprite,
     MouseButton, MouseEvent, MouseMoveEvent, MouseUpEvent, Path, Pixels, PlatformAtlas,
     PlatformDisplay, PlatformInput, PlatformInputHandler, PlatformWindow, Point, PolychromeSprite,
-    Priority, PromptButton, PromptLevel, Quad, Render, RenderGlyphParams, RenderImage,
-    RenderImageParams, RenderSvgParams, Replay, ResizeEdge, SMOOTH_SVG_SCALE_FACTOR,
+    Priority, PromptButton, PromptLevel, Quad, Render, RenderCustomParams, RenderGlyphParams,
+    RenderImage, RenderImageParams, RenderSvgParams, Replay, ResizeEdge, SMOOTH_SVG_SCALE_FACTOR,
     SUBPIXEL_VARIANTS_X, SUBPIXEL_VARIANTS_Y, ScaledPixels, Scene, Shadow, SharedString, Size,
     StrikethroughStyle, Style, SubpixelSprite, SubscriberSet, Subscription, SystemWindowTab,
     SystemWindowTabController, TabStopMap, TaffyLayoutEngine, Task, TextRenderingMode, TextStyle,
@@ -4372,6 +4372,54 @@ impl Window {
             color: color.opacity(element_opacity),
             tile,
             transformation,
+        });
+
+        Ok(())
+    }
+
+    /// Paint a caller-rasterized monochrome bitmap into the scene at the current
+    /// stacking context, tinted by `color`. `build` is invoked only on an atlas miss and
+    /// must return exactly `width * height` R8 (one byte per pixel) alpha samples for the
+    /// device-pixel `bounds.size`. Generic primitive: gpui does not interpret `id` — the
+    /// caller guarantees `id` uniquely identifies the bitmap content.
+    ///
+    /// This method should only be called as part of the paint phase of element drawing.
+    pub fn paint_custom_sprite(
+        &mut self,
+        bounds: Bounds<Pixels>,
+        id: u64,
+        color: Hsla,
+        build: &mut dyn FnMut() -> Result<Cow<'static, [u8]>>,
+    ) -> Result<()> {
+        self.invalidator.debug_assert_paint();
+
+        let element_opacity = self.element_opacity();
+        let bounds = self.snap_bounds(bounds);
+        let size = bounds.size.map(|p| DevicePixels(p.0.round() as i32));
+        if size.width.0 <= 0 || size.height.0 <= 0 {
+            return Ok(());
+        }
+        let params = RenderCustomParams { id, size };
+
+        let Some(tile) =
+            self.sprite_atlas
+                .get_or_insert_with(&params.clone().into(), &mut || {
+                    let bytes = build()?;
+                    Ok(Some((size, bytes)))
+                })?
+        else {
+            return Ok(());
+        };
+        let content_mask = self.snapped_content_mask();
+
+        self.next_frame.scene.insert_primitive(MonochromeSprite {
+            order: 0,
+            pad: 0,
+            bounds,
+            content_mask,
+            color: color.opacity(element_opacity),
+            tile,
+            transformation: TransformationMatrix::unit(),
         });
 
         Ok(())

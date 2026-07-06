@@ -85,6 +85,23 @@ pub fn current_headless_renderer() -> Option<Box<dyn gpui::PlatformHeadlessRende
     }
 }
 
+/// Returns the real platform text system for the current platform — for headless
+/// rendering and tests that need real glyph shaping. Parallels
+/// [`current_headless_renderer`]; on macOS this is the same CoreText-backed
+/// `MacTextSystem` the shipped app uses.
+#[cfg(feature = "test-support")]
+pub fn current_text_system() -> std::sync::Arc<dyn gpui::PlatformTextSystem> {
+    #[cfg(all(target_os = "macos", feature = "font-kit"))]
+    {
+        std::sync::Arc::new(gpui_macos::text_system::MacTextSystem::new())
+    }
+
+    #[cfg(not(all(target_os = "macos", feature = "font-kit")))]
+    {
+        unimplemented!("current_text_system requires macOS + the font-kit feature")
+    }
+}
+
 #[cfg(all(test, target_os = "macos"))]
 mod tests {
     use super::*;

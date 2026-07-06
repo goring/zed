@@ -24,7 +24,7 @@ use metal_renderer as renderer;
 mod open_type;
 
 #[cfg(feature = "font-kit")]
-mod text_system;
+pub mod text_system;
 
 mod platform;
 mod window;

@@ -396,7 +396,11 @@ impl WindowsWindowInner {
 
     fn handle_syskeyup_msg(&self, wparam: WPARAM, lparam: LPARAM) -> Option<isize> {
         let input = handle_key_event(wparam, lparam, &self.state, |keystroke, _| {
-            PlatformInput::KeyUp(KeyUpEvent { keystroke })
+            PlatformInput::KeyUp(KeyUpEvent {
+                keystroke,
+                physical_key: physical_key_from_lparam(lparam),
+                raw_modifiers: current_modifiers(),
+            })
         })?;
         let mut func = self.state.callbacks.input.take()?;
 
@@ -419,6 +423,8 @@ impl WindowsWindowInner {
                     keystroke,
                     is_held: lparam.0 & (0x1 << 30) > 0,
                     prefer_character_input,
+                    physical_key: physical_key_from_lparam(lparam),
+                    raw_modifiers: current_modifiers(),
                 })
             },
         ) else {
@@ -438,7 +444,11 @@ impl WindowsWindowInner {
 
     fn handle_keyup_msg(&self, wparam: WPARAM, lparam: LPARAM) -> Option<isize> {
         let Some(input) = handle_key_event(wparam, lparam, &self.state, |keystroke, _| {
-            PlatformInput::KeyUp(KeyUpEvent { keystroke })
+            PlatformInput::KeyUp(KeyUpEvent {
+                keystroke,
+                physical_key: physical_key_from_lparam(lparam),
+                raw_modifiers: current_modifiers(),
+            })
         }) else {
             return Some(1);
         };
@@ -1437,6 +1447,16 @@ impl Drop for ImeContext {
             ImmReleaseContext(self.hwnd, self.himc).ok().log_err();
         }
     }
+}
+
+/// Extracts the Scan Code Set 1 value from a key message's `lparam` (bits
+/// 16-23, with bit 24 marking an extended `0xe0`-prefixed key) and maps it to
+/// its W3C UI Events `code` value.
+fn physical_key_from_lparam(lparam: LPARAM) -> Option<&'static str> {
+    let scan_code = lparam.hiword() & 0xFF;
+    let extended = lparam.hiword() & 0x100 != 0;
+    let scan_code = if extended { 0xe000 | scan_code } else { scan_code };
+    physical_key_from_windows_scancode(scan_code)
 }
 
 fn handle_key_event<F>(

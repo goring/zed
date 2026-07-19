@@ -2999,9 +2999,11 @@ extern "C" fn do_command_by_selector(this: &Object, _: Sel, _: Sel) {
 
     if let Some((keystroke, callback)) = keystroke.zip(event_callback.as_mut()) {
         let handled = (callback)(PlatformInput::KeyDown(KeyDownEvent {
+            raw_modifiers: keystroke.modifiers,
             keystroke,
             is_held: false,
             prefer_character_input: false,
+            physical_key: None,
         }));
         state.as_ref().lock().do_command_handled = Some(!handled.propagate);
     }

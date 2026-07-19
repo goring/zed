@@ -1111,6 +1111,8 @@ impl X11Client {
                     keystroke,
                     is_held: false,
                     prefer_character_input: false,
+                    physical_key: gpui::physical_key_from_xkb_keycode(u32::from(event.detail)),
+                    raw_modifiers: modifiers,
                 }));
             }
             Event::KeyRelease(event) => {
@@ -1133,7 +1135,11 @@ impl X11Client {
                     keystroke
                 };
                 drop(state);
-                window.handle_input(PlatformInput::KeyUp(gpui::KeyUpEvent { keystroke }));
+                window.handle_input(PlatformInput::KeyUp(gpui::KeyUpEvent {
+                    keystroke,
+                    physical_key: gpui::physical_key_from_xkb_keycode(u32::from(event.detail)),
+                    raw_modifiers: modifiers,
+                }));
             }
             Event::XinputButtonPress(event) => {
                 let window = self.get_window(event.event)?;

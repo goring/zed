@@ -132,9 +132,13 @@ pub(crate) unsafe fn platform_input_from_native(
                 keystroke: parse_keystroke(native_event),
                 is_held: native_event.isARepeat() == YES,
                 prefer_character_input: false,
+                physical_key: gpui::physical_key_from_macos_keycode(native_event.keyCode()),
+                raw_modifiers: read_modifiers(native_event),
             })),
             NSEventType::NSKeyUp => Some(PlatformInput::KeyUp(KeyUpEvent {
                 keystroke: parse_keystroke(native_event),
+                physical_key: gpui::physical_key_from_macos_keycode(native_event.keyCode()),
+                raw_modifiers: read_modifiers(native_event),
             })),
             NSEventType::NSLeftMouseDown
             | NSEventType::NSRightMouseDown

@@ -4914,6 +4914,8 @@ impl Window {
                 keystroke: keystroke.clone(),
                 is_held: false,
                 prefer_character_input: false,
+                physical_key: None,
+                raw_modifiers: keystroke.modifiers,
             }),
             cx,
         );
@@ -5459,6 +5461,8 @@ impl Window {
                 keystroke: replay.keystroke.clone(),
                 is_held: false,
                 prefer_character_input: true,
+                physical_key: None,
+                raw_modifiers: replay.keystroke.modifiers,
             };
 
             cx.propagate_event = true;

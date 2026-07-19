@@ -32,6 +32,20 @@ pub struct KeyDownEvent {
     /// Whether to prefer character input over keybindings for this keystroke.
     /// In some cases, like AltGr on Windows, modifiers are significant for character input.
     pub prefer_character_input: bool,
+
+    /// The W3C UI Events `code` value for the physical key that generated this
+    /// event (e.g. "KeyA", "Digit2", "NumpadEnter"), independent of the active
+    /// keyboard layout. `None` for simulated or replayed input, or when the
+    /// platform cannot determine the physical key.
+    pub physical_key: Option<&'static str>,
+
+    /// The modifier state as reported by the platform for this event, BEFORE
+    /// any layout-driven normalization. `keystroke.modifiers` may fold a
+    /// modifier into the key (e.g. macOS delivers ctrl-shift-2 as ctrl-@ with
+    /// shift cleared); this field preserves the physically-held state, pairing
+    /// with `physical_key` for layout-independent matching. For simulated or
+    /// replayed input it mirrors `keystroke.modifiers`.
+    pub raw_modifiers: Modifiers,
 }
 
 impl Sealed for KeyDownEvent {}
@@ -47,6 +61,15 @@ impl KeyEvent for KeyDownEvent {}
 pub struct KeyUpEvent {
     /// The keystroke that was released.
     pub keystroke: Keystroke,
+
+    /// The W3C UI Events `code` value for the physical key that generated this
+    /// event, independent of the active keyboard layout. `None` for simulated
+    /// or replayed input, or when the platform cannot determine the physical key.
+    pub physical_key: Option<&'static str>,
+
+    /// The modifier state as reported by the platform for this event, before
+    /// any layout-driven normalization. See [`KeyDownEvent::raw_modifiers`].
+    pub raw_modifiers: Modifiers,
 }
 
 impl Sealed for KeyUpEvent {}

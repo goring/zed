@@ -29,11 +29,11 @@ use ctor::ctor;
 use dispatch2::DispatchQueue;
 use futures::channel::oneshot;
 use gpui::{
-    Action, AnyWindowHandle, BackgroundExecutor, ClipboardItem, CursorStyle, ForegroundExecutor,
-    KeyContext, Keymap, Menu, MenuItem, OsMenu, OwnedMenu, PathPromptOptions, Platform,
-    PlatformDisplay, PlatformKeyboardLayout, PlatformKeyboardMapper, PlatformTextSystem,
-    PlatformWindow, Result, SystemMenuType, Task, ThermalState, WindowAppearance, WindowKind,
-    WindowParams, popup::PopupNotSupportedError,
+    AccessibilityDisplayOptions, Action, AnyWindowHandle, BackgroundExecutor, ClipboardItem,
+    CursorStyle, ForegroundExecutor, KeyContext, Keymap, Menu, MenuItem, OsMenu, OwnedMenu,
+    PathPromptOptions, Platform, PlatformDisplay, PlatformKeyboardLayout, PlatformKeyboardMapper,
+    PlatformTextSystem, PlatformWindow, Result, SystemMenuType, Task, ThermalState,
+    WindowAppearance, WindowKind, WindowParams, popup::PopupNotSupportedError,
 };
 use gpui_util::{ResultExt, new_std_command};
 use itertools::Itertools;
@@ -158,6 +158,11 @@ unsafe fn build_classes() {
                 on_system_wake as extern "C" fn(&mut Object, Sel, id),
             );
 
+            decl.add_method(
+                sel!(onAccessibilityDisplayOptionsChange:),
+                on_accessibility_display_options_change as extern "C" fn(&mut Object, Sel, id),
+            );
+
             decl.register()
         }
     }
@@ -178,6 +183,8 @@ pub(crate) struct MacPlatformState {
     on_thermal_state_change: Option<Box<dyn FnMut()>>,
     on_system_wake: Option<Box<dyn FnMut()>>,
     system_wake_observer_registered: bool,
+    on_accessibility_display_options_change: Option<Box<dyn FnMut()>>,
+    accessibility_display_options_observer_registered: bool,
     quit: Option<Box<dyn FnMut()>>,
     menu_command: Option<Box<dyn FnMut(&dyn Action)>>,
     validate_menu_command: Option<Box<dyn FnMut(&dyn Action) -> bool>>,
@@ -234,6 +241,8 @@ impl MacPlatform {
             on_thermal_state_change: None,
             on_system_wake: None,
             system_wake_observer_registered: false,
+            on_accessibility_display_options_change: None,
+            accessibility_display_options_observer_registered: false,
             menus: None,
             keyboard_mapper,
             cursor_visible: Arc::new(AtomicBool::new(true)),
@@ -980,6 +989,53 @@ impl Platform for MacPlatform {
         }
     }
 
+    fn accessibility_display_options(&self) -> AccessibilityDisplayOptions {
+        // SAFETY: every selector below is a `BOOL` property of the shared
+        // NSWorkspace, and must be read on the main thread.
+        unsafe {
+            let workspace: id = msg_send![class!(NSWorkspace), sharedWorkspace];
+            let reduce_motion: BOOL = msg_send![workspace, accessibilityDisplayShouldReduceMotion];
+            let increase_contrast: BOOL =
+                msg_send![workspace, accessibilityDisplayShouldIncreaseContrast];
+            let differentiate_without_color: BOOL = msg_send![
+                workspace,
+                accessibilityDisplayShouldDifferentiateWithoutColor
+            ];
+            let reduce_transparency: BOOL =
+                msg_send![workspace, accessibilityDisplayShouldReduceTransparency];
+            AccessibilityDisplayOptions {
+                reduce_motion: reduce_motion == YES,
+                increase_contrast: increase_contrast == YES,
+                differentiate_without_color: differentiate_without_color == YES,
+                reduce_transparency: reduce_transparency == YES,
+            }
+        }
+    }
+
+    fn on_accessibility_display_options_changed(&self, callback: Box<dyn FnMut()>) {
+        // Registers against NSWorkspace's own notification center (not the default
+        // one), so it follows `on_system_wake`'s lazy shape rather than the
+        // eager registration `did_finish_launching` does for the default center.
+        let mut state = self.0.lock();
+        state.on_accessibility_display_options_change = Some(callback);
+        if state.accessibility_display_options_observer_registered {
+            return;
+        }
+        drop(state);
+
+        // SAFETY: APP_CLASS is registered during startup and returns the shared NSApplication.
+        unsafe {
+            let app: id = msg_send![APP_CLASS, sharedApplication];
+            let delegate: id = msg_send![app, delegate];
+            if delegate != nil {
+                register_accessibility_display_options_observer(delegate);
+                self.0
+                    .lock()
+                    .accessibility_display_options_observer_registered = true;
+            }
+        }
+    }
+
     fn thermal_state(&self) -> ThermalState {
         unsafe {
             let process_info: id = msg_send![class!(NSProcessInfo), processInfo];
@@ -1301,11 +1357,32 @@ extern "C" fn did_finish_launching(this: &mut Object, _: Sel, _: id) {
                 register_system_wake_observer(observer);
                 state.system_wake_observer_registered = true;
             }
+            if state.on_accessibility_display_options_change.is_some()
+                && !state.accessibility_display_options_observer_registered
+            {
+                register_accessibility_display_options_observer(observer);
+                state.accessibility_display_options_observer_registered = true;
+            }
             state.finish_launching.take()
         };
         if let Some(callback) = callback {
             callback();
         }
+    }
+}
+
+unsafe fn register_accessibility_display_options_observer(observer: id) {
+    // SAFETY: observer is an Objective-C object implementing
+    // onAccessibilityDisplayOptionsChange:.
+    unsafe {
+        let workspace: id = msg_send![class!(NSWorkspace), sharedWorkspace];
+        let workspace_center: *mut Object = msg_send![workspace, notificationCenter];
+        let name = ns_string("NSWorkspaceAccessibilityDisplayOptionsDidChangeNotification");
+        let _: () = msg_send![workspace_center, addObserver: observer
+            selector: sel!(onAccessibilityDisplayOptionsChange:)
+            name: name
+            object: nil
+        ];
     }
 }
 
@@ -1381,6 +1458,33 @@ extern "C" fn on_thermal_state_change(this: &mut Object, _: Sel, _: id) {
                 .0
                 .lock()
                 .on_thermal_state_change
+                .get_or_insert(callback);
+        }
+    }
+}
+
+extern "C" fn on_accessibility_display_options_change(this: &mut Object, _: Sel, _: id) {
+    // Deferred to the next run loop iteration for the same reason as the thermal
+    // notification above: NSNotificationCenter delivers synchronously and may fire
+    // while the App RefCell is already borrowed.
+    // SAFETY: this is the registered app delegate carrying MAC_PLATFORM_IVAR.
+    let platform = unsafe { get_mac_platform(this) };
+    let platform_ptr = platform as *const MacPlatform as *mut c_void;
+    // SAFETY: platform lives for the process lifetime while callbacks are registered.
+    unsafe {
+        DispatchQueue::main().exec_async_f(platform_ptr, on_accessibility_display_options_change);
+    }
+
+    extern "C" fn on_accessibility_display_options_change(context: *mut c_void) {
+        let platform = unsafe { &*(context as *const MacPlatform) };
+        let mut lock = platform.0.lock();
+        if let Some(mut callback) = lock.on_accessibility_display_options_change.take() {
+            drop(lock);
+            callback();
+            platform
+                .0
+                .lock()
+                .on_accessibility_display_options_change
                 .get_or_insert(callback);
         }
     }

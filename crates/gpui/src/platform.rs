@@ -251,6 +251,23 @@ pub trait Platform: 'static {
     fn thermal_state(&self) -> ThermalState;
     fn on_thermal_state_change(&self, callback: Box<dyn FnMut()>);
 
+    /// Returns the operating system's accessibility display preferences.
+    ///
+    /// Platforms without such preferences report [`AccessibilityDisplayOptions::default`]
+    /// (every option off).
+    fn accessibility_display_options(&self) -> AccessibilityDisplayOptions {
+        AccessibilityDisplayOptions::default()
+    }
+
+    /// Registers the callback invoked when any of the values reported by
+    /// [`Platform::accessibility_display_options`] changes.
+    ///
+    /// Implementations must invoke the callback on the main thread. No-op on
+    /// platforms that do not report accessibility display preferences.
+    fn on_accessibility_display_options_changed(&self, callback: Box<dyn FnMut()>) {
+        _ = callback;
+    }
+
     /// Sets the application's process-wide identity and user-visible name.
     ///
     /// The identifier is used for platform identity mechanisms such as the
@@ -396,6 +413,29 @@ pub struct SystemNotificationResponse {
     /// The pressed action button's [`SystemNotificationAction::id`], or
     /// `None` when the user activated the notification body itself.
     pub action_id: Option<SharedString>,
+}
+
+/// The operating system's accessibility display preferences, as reported by
+/// [`Platform::accessibility_display_options`].
+///
+/// Each option is a user preference about how the interface should be
+/// presented, not a capability of the machine. A platform that cannot report a
+/// given preference leaves it `false`, which is also the value every option
+/// takes on a platform with no accessibility display preferences at all — so
+/// the default is always "present the interface normally".
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct AccessibilityDisplayOptions {
+    /// The user prefers reduced motion: animation should be shortened or
+    /// replaced with an instant change, and non-essential motion avoided.
+    pub reduce_motion: bool,
+    /// The user prefers increased contrast between foreground and background.
+    pub increase_contrast: bool,
+    /// The user prefers that information conveyed by color also be conveyed by
+    /// shape, text, or another non-color cue.
+    pub differentiate_without_color: bool,
+    /// The user prefers reduced transparency: blur and vibrancy effects should
+    /// be replaced with opaque backgrounds.
+    pub reduce_transparency: bool,
 }
 
 /// Thermal state of the system

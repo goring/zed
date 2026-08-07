@@ -43,11 +43,11 @@ pub use visual_test_context::*;
 #[cfg(any(feature = "inspector", debug_assertions))]
 use crate::InspectorElementRegistry;
 use crate::{
-    Action, ActionBuildError, ActionRegistry, Any, AnyView, AnyWindowHandle, AppContext, Arena,
-    ArenaBox, Asset, AssetSource, BackgroundExecutor, Bounds, ClipboardItem, CursorStyle,
-    DispatchPhase, DisplayId, EventEmitter, ExternalDragPayload, FocusHandle, FocusMap,
-    ForegroundExecutor, Global, KeyBinding, KeyContext, Keymap, Keystroke, LayoutId, Menu,
-    MenuItem, OwnedMenu, PathPromptOptions, Pixels, Platform, PlatformDisplay,
+    AccessibilityDisplayOptions, Action, ActionBuildError, ActionRegistry, Any, AnyView,
+    AnyWindowHandle, AppContext, Arena, ArenaBox, Asset, AssetSource, BackgroundExecutor, Bounds,
+    ClipboardItem, CursorStyle, DispatchPhase, DisplayId, EventEmitter, ExternalDragPayload,
+    FocusHandle, FocusMap, ForegroundExecutor, Global, KeyBinding, KeyContext, Keymap, Keystroke,
+    LayoutId, Menu, MenuItem, OwnedMenu, PathPromptOptions, Pixels, Platform, PlatformDisplay,
     PlatformKeyboardLayout, PlatformKeyboardMapper, Point, Priority, PromptBuilder, PromptButton,
     PromptHandle, PromptLevel, Render, RenderImage, RenderablePromptHandle, Reservation,
     ScreenCaptureSource, SharedString, SubscriberSet, Subscription, SvgRenderer,
@@ -717,6 +717,7 @@ pub struct App {
     pub(crate) keystroke_interceptors: SubscriberSet<(), KeystrokeObserver>,
     pub(crate) keyboard_layout_observers: SubscriberSet<(), Handler>,
     pub(crate) thermal_state_observers: SubscriberSet<(), Handler>,
+    pub(crate) accessibility_display_options_observers: SubscriberSet<(), Handler>,
     pub(crate) release_listeners: SubscriberSet<EntityId, ReleaseListener>,
     pub(crate) global_observers: SubscriberSet<TypeId, Handler>,
     pub(crate) quit_observers: SubscriberSet<(), QuitHandler>,
@@ -842,6 +843,7 @@ impl App {
                 keystroke_interceptors: SubscriberSet::new(),
                 keyboard_layout_observers: SubscriberSet::new(),
                 thermal_state_observers: SubscriberSet::new(),
+                accessibility_display_options_observers: SubscriberSet::new(),
                 global_observers: SubscriberSet::new(),
                 quit_observers: SubscriberSet::new(),
                 restart_observers: SubscriberSet::new(),
@@ -893,6 +895,18 @@ impl App {
                 if let Some(app) = app.upgrade() {
                     let cx = &mut app.borrow_mut();
                     cx.thermal_state_observers
+                        .clone()
+                        .retain(&(), move |callback| (callback)(cx));
+                }
+            }
+        }));
+
+        platform.on_accessibility_display_options_changed(Box::new({
+            let app = Rc::downgrade(&app);
+            move || {
+                if let Some(app) = app.upgrade() {
+                    let cx = &mut app.borrow_mut();
+                    cx.accessibility_display_options_observers
                         .clone()
                         .retain(&(), move |callback| (callback)(cx));
                 }
@@ -1325,6 +1339,33 @@ impl App {
         F: 'static + FnMut(&mut App),
     {
         let (subscription, activate) = self.thermal_state_observers.insert(
+            (),
+            Box::new(move |cx| {
+                callback(cx);
+                true
+            }),
+        );
+        activate();
+        subscription
+    }
+
+    /// Returns the operating system's accessibility display preferences.
+    ///
+    /// Every option is `false` on a platform that does not report them, so a
+    /// caller cannot distinguish "the user prefers normal presentation" from
+    /// "this platform has no such preference" — check the platform first if
+    /// that distinction matters.
+    pub fn accessibility_display_options(&self) -> AccessibilityDisplayOptions {
+        self.platform.accessibility_display_options()
+    }
+
+    /// Invokes a handler when any of the accessibility display preferences
+    /// reported by [`App::accessibility_display_options`] changes.
+    pub fn on_accessibility_display_options_changed<F>(&self, mut callback: F) -> Subscription
+    where
+        F: 'static + FnMut(&mut App),
+    {
+        let (subscription, activate) = self.accessibility_display_options_observers.insert(
             (),
             Box::new(move |cx| {
                 callback(cx);

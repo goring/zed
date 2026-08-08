@@ -928,6 +928,26 @@ impl VisualTestContext {
         self.background_executor.run_until_parked();
     }
 
+    /// Simulates assistive technology (a screen reader, say) connecting to the
+    /// window, which is what activates GPUI's accessibility support.
+    ///
+    /// Until this is called, no accessibility tree is built under the test
+    /// platform — the flag only ever flips from a platform adapter callback, and
+    /// a test window has no adapter — so [`Window::is_a11y_active`] is `false`
+    /// and [`Window::debug_a11y_tree_json`] returns `None`. Call this first in a
+    /// test that asserts on accessibility roles, labels, or focus.
+    pub fn simulate_a11y_activation(&mut self) {
+        self.test_window(self.window).simulate_a11y_activation();
+        self.background_executor.run_until_parked();
+    }
+
+    /// Simulates assistive technology disconnecting — the counterpart of
+    /// [`Self::simulate_a11y_activation`].
+    pub fn simulate_a11y_deactivation(&mut self) {
+        self.test_window(self.window).simulate_a11y_deactivation();
+        self.background_executor.run_until_parked();
+    }
+
     /// Simulates the user blurring the window.
     pub fn deactivate_window(&mut self) {
         if Some(self.window) == self.test_platform.active_window() {

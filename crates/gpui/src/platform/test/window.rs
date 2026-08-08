@@ -1,5 +1,5 @@
 use crate::{
-    AnyWindowHandle, AtlasKey, AtlasTextureId, AtlasTile, Bounds, DevicePixels,
+    A11yCallbacks, AnyWindowHandle, AtlasKey, AtlasTextureId, AtlasTile, Bounds, DevicePixels,
     DispatchEventResult, GpuSpecs, Pixels, PlatformAtlas, PlatformDisplay,
     PlatformHeadlessRenderer, PlatformInput, PlatformInputHandler, PlatformWindow, Point,
     PromptButton, RequestFrameOptions, Scene, Size, TestPlatform, TileId, WindowAppearance,
@@ -40,6 +40,11 @@ pub(crate) struct TestWindowState {
     appearance: WindowAppearance,
     external_drag_files: Vec<(PathBuf, bool)>,
     start_external_drag_result: bool,
+    /// The accessibility callbacks GPUI hands every platform window at open
+    /// time. A real adapter invokes `activation` when assistive technology
+    /// connects; a test window retains them so a test can do the same on
+    /// demand — see [`TestWindow::simulate_a11y_activation`].
+    a11y_callbacks: Option<A11yCallbacks>,
 }
 
 #[derive(Clone)]
@@ -101,6 +106,7 @@ impl TestWindow {
             appearance: WindowAppearance::Light,
             external_drag_files: Vec::new(),
             start_external_drag_result: false,
+            a11y_callbacks: None,
         })))
     }
 
@@ -155,6 +161,33 @@ impl TestWindow {
 
     pub fn set_start_external_drag_result(&self, result: bool) {
         self.0.lock().start_external_drag_result = result;
+    }
+
+    /// Simulates assistive technology connecting to this window, exactly as a
+    /// real platform adapter does when a screen reader attaches: it invokes the
+    /// activation callback GPUI registered through
+    /// [`PlatformWindow::a11y_init`], which flips the window's a11y flag on and
+    /// schedules the refresh that builds the first full tree.
+    ///
+    /// Without this, an accessibility tree is never built under the test
+    /// platform (the flag only ever flips from an adapter callback), so a test
+    /// asserting on roles and labels has nothing to read.
+    pub fn simulate_a11y_activation(&self) {
+        let lock = self.0.lock();
+        let Some(callbacks) = lock.a11y_callbacks.as_ref() else {
+            return;
+        };
+        (callbacks.activation)();
+    }
+
+    /// Simulates assistive technology disconnecting — the counterpart of
+    /// [`Self::simulate_a11y_activation`].
+    pub fn simulate_a11y_deactivation(&self) {
+        let lock = self.0.lock();
+        let Some(callbacks) = lock.a11y_callbacks.as_ref() else {
+            return;
+        };
+        (callbacks.deactivation)();
     }
 }
 
@@ -338,6 +371,14 @@ impl PlatformWindow for TestWindow {
 
     fn sprite_atlas(&self) -> sync::Arc<dyn crate::PlatformAtlas> {
         self.0.lock().sprite_atlas.clone()
+    }
+
+    // A test window has no platform accessibility adapter, so nothing will ever
+    // call these callbacks on its own. Retaining them — rather than letting the
+    // default no-op drop them — is what lets a test stand in for the adapter and
+    // activate accessibility itself.
+    fn a11y_init(&self, callbacks: A11yCallbacks) {
+        self.0.lock().a11y_callbacks = Some(callbacks);
     }
 
     #[cfg(any(test, feature = "test-support"))]

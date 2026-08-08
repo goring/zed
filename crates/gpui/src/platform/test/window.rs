@@ -173,21 +173,40 @@ impl TestWindow {
     /// platform (the flag only ever flips from an adapter callback), so a test
     /// asserting on roles and labels has nothing to read.
     pub fn simulate_a11y_activation(&self) {
-        let lock = self.0.lock();
-        let Some(callbacks) = lock.a11y_callbacks.as_ref() else {
-            return;
-        };
-        (callbacks.activation)();
+        self.with_a11y_callbacks("activation", |callbacks| {
+            // The returned initial tree is what a real adapter would answer its
+            // first query with; a test window has no adapter to hand it to, and
+            // the forced refresh builds the real tree anyway.
+            let _initial_tree = (callbacks.activation)();
+        });
     }
 
     /// Simulates assistive technology disconnecting — the counterpart of
     /// [`Self::simulate_a11y_activation`].
     pub fn simulate_a11y_deactivation(&self) {
-        let lock = self.0.lock();
-        let Some(callbacks) = lock.a11y_callbacks.as_ref() else {
+        self.with_a11y_callbacks("deactivation", |callbacks| (callbacks.deactivation)());
+    }
+
+    /// Take the a11y callbacks out of the lock, run `f`, and put them back — the
+    /// take-then-drop shape the rest of this file's `simulate_*` helpers use. A
+    /// callback re-entering the window (the activation one refreshes it) would
+    /// deadlock if it ran under the lock.
+    fn with_a11y_callbacks(&self, what: &str, f: impl FnOnce(&A11yCallbacks)) {
+        let mut lock = self.0.lock();
+        let Some(callbacks) = lock.a11y_callbacks.take() else {
+            // Not a no-op worth swallowing: the caller is about to assert on an
+            // accessibility tree that will never be built, and a silent return
+            // makes that look like the UI's fault instead of the window's.
+            log::warn!(
+                "TestWindow::simulate_a11y_{what}: no accessibility callbacks registered \
+                 (the window was opened with accessibility force-disabled, or before \
+                 a11y_init ran), so no accessibility tree will be built"
+            );
             return;
         };
-        (callbacks.deactivation)();
+        drop(lock);
+        f(&callbacks);
+        self.0.lock().a11y_callbacks = Some(callbacks);
     }
 }
 

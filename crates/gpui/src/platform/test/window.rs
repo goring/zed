@@ -233,7 +233,13 @@ impl PlatformWindow for TestWindow {
     }
 
     fn scale_factor(&self) -> f32 {
-        2.0
+        // Overridable so headless/offscreen tests can render at a non-retina
+        // scale: a fixed 2.0 hides pixel-snapping defects that only show on a
+        // 1x display, where a one-device-pixel error is a whole visible pixel.
+        std::env::var("GPUI_TEST_SCALE_FACTOR")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(2.0)
     }
 
     fn appearance(&self) -> WindowAppearance {
